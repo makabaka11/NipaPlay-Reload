@@ -188,3 +188,107 @@ int parseDanmakuColorToInt(dynamic colorValue) {
 int _clampColorComponent(int value) {
   return value.clamp(0, 255).toInt();
 }
+
+/// 将弹幕评论列表转换为 Bilibili XML 格式字符串。
+///
+/// 每条评论支持以下字段（兼容多种命名）：
+/// - `t` / `time`: 出现时间（秒）
+/// - `c` / `content`: 弹幕文本
+/// - `y` / `type` / `originalType`: 弹幕类型
+/// - `r` / `color`: 颜色（rgb 字符串或 hex）
+/// - `fontSize` / `size` / `fontsize`: 字号
+/// - `timestamp` / `d`: 时间戳
+String convertDanmakuCommentsToBilibiliXml(List<dynamic> comments) {
+  final buffer = StringBuffer();
+  buffer.writeln('<?xml version="1.0" encoding="UTF-8"?>');
+  buffer.writeln('<i>');
+
+  for (final raw in comments) {
+    if (raw is! Map) continue;
+    final item = raw is Map<String, dynamic>
+        ? raw
+        : Map<String, dynamic>.from(raw);
+
+    final content = (item['content'] ?? item['c'] ?? '').toString();
+    if (content.isEmpty) continue;
+
+    // 时间（秒）
+    final timeValue = _resolveDouble(item['time'] ?? item['t']);
+    final timeText = _formatDanmakuTime(timeValue);
+
+    // 类型码
+    final typeCode = _resolveTypeCode(item);
+
+    // 字号
+    final fontSize = _resolveFontSize(item);
+
+    // 颜色码
+    final colorCode = parseDanmakuColorToInt(item['color'] ?? item['r']);
+
+    // 时间戳
+    final timestamp = _resolveTimestamp(item);
+
+    final escaped = encodeDanmakuXmlText(content);
+    buffer.writeln(
+      '<d p="$timeText,$typeCode,$fontSize,$colorCode,$timestamp,0,0,0">$escaped</d>',
+    );
+  }
+
+  buffer.writeln('</i>');
+  return buffer.toString();
+}
+
+double _resolveDouble(dynamic value) {
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value) ?? 0.0;
+  return 0.0;
+}
+
+int _resolveTypeCode(Map<String, dynamic> item) {
+  final originalType = item['originalType'];
+  if (originalType is num) {
+    final code = originalType.toInt();
+    if (code > 0) return code;
+  }
+  final typeValue = item['type'] ?? item['y'];
+  if (typeValue is num) {
+    final code = typeValue.toInt();
+    if (code > 0) return code;
+  }
+  final typeText = typeValue?.toString().toLowerCase();
+  switch (typeText) {
+    case 'top':
+      return DanmakuMode.top.code;
+    case 'bottom':
+      return DanmakuMode.bottom.code;
+    case 'scroll':
+    case 'right':
+      return DanmakuMode.scroll.code;
+    default:
+      return DanmakuMode.scroll.code;
+  }
+}
+
+int _resolveFontSize(Map<String, dynamic> item) {
+  final sizeValue = item['fontSize'] ?? item['size'] ?? item['fontsize'];
+  if (sizeValue is num) return sizeValue.round();
+  if (sizeValue is String) {
+    final parsed = double.tryParse(sizeValue);
+    if (parsed != null) return parsed.round();
+  }
+  return 25;
+}
+
+int _resolveTimestamp(Map<String, dynamic> item) {
+  final value = item['timestamp'] ?? item['d'];
+  if (value is num) return value.round();
+  if (value is String) return int.tryParse(value) ?? 0;
+  return 0;
+}
+
+String _formatDanmakuTime(double value) {
+  if (value.isNaN || value.isInfinite) return '0';
+  final safeValue = value < 0 ? 0.0 : value;
+  final text = safeValue.toStringAsFixed(3);
+  return text.replaceFirst(RegExp(r'\.?0+$'), '');
+}

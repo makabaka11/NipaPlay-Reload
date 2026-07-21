@@ -49,6 +49,7 @@ import 'package:nipaplay/media_library/adaptive_library_management_overview.dart
 import 'package:nipaplay/media_library/unified_library_management_model.dart';
 import 'package:nipaplay/app/app_display_surface.dart';
 import 'package:nipaplay/app/app_display_surface_scope.dart';
+import 'package:nipaplay/utils/danmaku_xml_utils.dart';
 
 enum LibraryManagementSection { local, webdav, smb }
 
@@ -180,6 +181,11 @@ class _LibraryManagementTabState extends State<LibraryManagementTab> {
   String _remoteScrapeMessage = '';
   int _remoteScrapeLastProcessed = -1;
   int _remoteScrapeTotal = 0;
+
+  // 本地目录批量拉取弹幕进度状态
+  bool _isBatchFetchingDanmaku = false;
+  double? _batchFetchDanmakuProgress;
+  String _batchFetchDanmakuMessage = '';
 
   // 排序相关状态
   int _sortOption =
@@ -2448,17 +2454,31 @@ class _LibraryManagementTabState extends State<LibraryManagementTab> {
     required bool isRemoteMode,
     required Color scanProgressBackground,
   }) {
-    final message =
-        isRemoteMode ? _remoteScrapeMessage : scanService?.scanMessage ?? '';
-    final isWorking =
-        isRemoteMode ? _isRemoteScraping : scanService?.isScanning == true;
-    final progress =
-        isRemoteMode ? _remoteScrapeProgress : scanService?.scanProgress;
-    final hasFailures = !isRemoteMode &&
+    // 批量拉取弹幕优先级最高，无论本地/远程模式都显示
+    final isBatchFetching = _isBatchFetchingDanmaku;
+    final batchMessage = _batchFetchDanmakuMessage;
+    final message = isBatchFetching
+        ? batchMessage
+        : isRemoteMode
+            ? _remoteScrapeMessage
+            : scanService?.scanMessage ?? '';
+    final isWorking = isBatchFetching
+        ? true
+        : isRemoteMode
+            ? _isRemoteScraping
+            : scanService?.isScanning == true;
+    final progress = isBatchFetching
+        ? _batchFetchDanmakuProgress
+        : isRemoteMode
+            ? _remoteScrapeProgress
+            : scanService?.scanProgress;
+    final hasFailures = !isBatchFetching &&
+        !isRemoteMode &&
         scanService != null &&
         !scanService.isScanning &&
         scanService.failedScanFiles.isNotEmpty;
-    final hasChanges = !isRemoteMode &&
+    final hasChanges = !isBatchFetching &&
+        !isRemoteMode &&
         scanService != null &&
         !scanService.isScanning &&
         scanService.detectedChanges.isNotEmpty;
@@ -2729,7 +2749,7 @@ class _LibraryManagementTabState extends State<LibraryManagementTab> {
   }
 
   List<LocalLibraryActionControl> _buildMountedDirectoryActions() {
-    return [
+    final actions = [
       LocalLibraryActionControl(
         label: '虚拟根目录',
         desktopIcon: Icons.home_outlined,
@@ -2749,6 +2769,178 @@ class _LibraryManagementTabState extends State<LibraryManagementTab> {
         onPressed: _isMountedDirectoryLoading ? null : _loadMountedDirectory,
       ),
     ];
+
+    // 本地目录且有已匹配视频时显示"批量拉取弹幕"按钮
+    final mountedLocation = _mountedLocation;
+    if (mountedLocation != null &&
+        mountedLocation.type == _MountedLibraryType.local &&
+        !_isBatchFetchingDanmaku &&
+        _currentDirectoryHasMatchedVideos()) {
+      actions.add(LocalLibraryActionControl(
+        label: '批量拉取弹幕',
+        desktopIcon: Icons.download_for_offline_outlined,
+        phoneIcon: cupertino.CupertinoIcons.cloud_download,
+        onPressed: () => unawaited(_batchFetchMountedDanmaku()),
+      ));
+    }
+
+    return actions;
+  }
+
+  /// 检查当前目录（不含子文件夹）是否有已匹配的视频文件
+  bool _currentDirectoryHasMatchedVideos() {
+    final watchHistory = Provider.of<WatchHistoryProvider>(context, listen: false);
+    for (final entry in _mountedEntries) {
+      if (entry.isDirectory) continue;
+      final ext = p.extension(entry.name).toLowerCase();
+      if (!_batchMatchVideoExtensions.contains(ext)) continue;
+      final historyItem = watchHistory.history
+          .where((item) => item.filePath == entry.path)
+          .firstOrNull;
+      if (historyItem != null &&
+          (historyItem.episodeId != null || historyItem.animeId != null)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// 批量拉取当前目录内已匹配视频的弹幕，保存为与视频同名的 .xml 文件。
+  /// 仅处理当前目录（不含子文件夹）中已匹配的视频文件。
+  Future<void> _batchFetchMountedDanmaku() async {
+    if (_isBatchFetchingDanmaku) {
+      BlurSnackBar.show(context, '已有弹幕拉取任务在进行中，请稍后再试。');
+      return;
+    }
+
+    final mountedLocation = _mountedLocation;
+    if (mountedLocation == null ||
+        mountedLocation.type != _MountedLibraryType.local) {
+      return;
+    }
+
+    final watchHistory = Provider.of<WatchHistoryProvider>(context, listen: false);
+
+    // 收集当前目录中已匹配的视频文件
+    final matchedVideos = <_MountedLibraryEntry>[];
+    for (final entry in _mountedEntries) {
+      if (entry.isDirectory) continue;
+      final ext = p.extension(entry.name).toLowerCase();
+      if (!_batchMatchVideoExtensions.contains(ext)) continue;
+      final historyItem = watchHistory.history
+          .where((item) => item.filePath == entry.path)
+          .firstOrNull;
+      if (historyItem != null &&
+          historyItem.episodeId != null &&
+          historyItem.animeId != null) {
+        matchedVideos.add(entry);
+      }
+    }
+
+    if (matchedVideos.isEmpty) {
+      BlurSnackBar.show(context, '当前目录没有已匹配的视频文件');
+      return;
+    }
+
+    final colorScheme = Theme.of(context).colorScheme;
+    final confirm = await BlurDialog.show<bool>(
+      context: context,
+      title: '批量拉取弹幕',
+      content: '确定要拉取当前目录中 ${matchedVideos.length} 个已匹配视频的弹幕吗？\n\n'
+          '弹幕将保存为与视频同名的 .xml 文件，存放在视频所在目录中，离线播放时自动加载。',
+      actions: [
+        HoverScaleTextButton(
+          text: '取消',
+          idleColor: colorScheme.onSurface.withOpacity(0.7),
+          hoverColor: colorScheme.onSurface,
+          onPressed: () => Navigator.of(context).pop(false),
+        ),
+        HoverScaleTextButton(
+          text: '拉取',
+          idleColor: colorScheme.primary,
+          hoverColor: colorScheme.primary,
+          onPressed: () => Navigator.of(context).pop(true),
+        ),
+      ],
+    );
+
+    if (confirm != true || !mounted) return;
+
+    setState(() {
+      _isBatchFetchingDanmaku = true;
+      _batchFetchDanmakuProgress = null;
+      _batchFetchDanmakuMessage = '正在准备拉取弹幕...';
+    });
+
+    int successCount = 0;
+    int failCount = 0;
+    int skipCount = 0;
+
+    for (var i = 0; i < matchedVideos.length; i++) {
+      if (!mounted) return;
+      final entry = matchedVideos[i];
+      final fileName = entry.name;
+
+      setState(() {
+        _batchFetchDanmakuMessage = '正在拉取弹幕：$fileName (${i + 1}/${matchedVideos.length})';
+        _batchFetchDanmakuProgress = (i / matchedVideos.length).clamp(0.0, 1.0);
+      });
+
+      try {
+        // 查找该视频的匹配信息
+        final historyItem = watchHistory.history
+            .where((item) => item.filePath == entry.path)
+            .firstOrNull;
+        if (historyItem == null ||
+            historyItem.episodeId == null ||
+            historyItem.animeId == null) {
+          skipCount++;
+          continue;
+        }
+
+        final episodeId = historyItem.episodeId.toString();
+        final animeId = historyItem.animeId!;
+
+        // 通过 API 拉取弹幕（照搬视频加载环节的方法）
+        final danmakuData = await DandanplayService.getDanmaku(episodeId, animeId)
+            .timeout(const Duration(seconds: 32), onTimeout: () {
+          throw TimeoutException('拉取弹幕超时');
+        });
+
+        final comments = danmakuData['comments'];
+        if (comments is! List || comments.isEmpty) {
+          skipCount++;
+          continue;
+        }
+
+        // 转换为 Bilibili XML 格式并保存
+        final xmlContent = convertDanmakuCommentsToBilibiliXml(comments);
+        final xmlPath = p.setExtension(entry.path, '.xml');
+        final xmlFile = io.File(xmlPath);
+        await xmlFile.writeAsString(xmlContent);
+
+        successCount++;
+      } catch (e) {
+        debugPrint('拉取弹幕失败: ${entry.name} - $e');
+        failCount++;
+      }
+    }
+
+    if (!mounted) return;
+
+    final summary = '弹幕拉取完成：成功 $successCount，失败 $failCount'
+        '${skipCount > 0 ? '，跳过 $skipCount' : ''}'
+        ' / 共 ${matchedVideos.length} 个';
+
+    setState(() {
+      _isBatchFetchingDanmaku = false;
+      _batchFetchDanmakuProgress = null;
+      _batchFetchDanmakuMessage = '';
+    });
+
+    if (mounted) {
+      BlurSnackBar.show(context, summary);
+    }
   }
 
   Widget _buildMountedDirectoryPathBar(_MountedLibraryLocation location) {
