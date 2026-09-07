@@ -1,0 +1,50 @@
+name: Manual Build Windows x64 ZIP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-windows-x64-zip-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Windows x64 ZIP
+    runs-on: windows-2022
+    env:
+      FVP_DEPS_URL: https://sourceforge.net/projects/mdk-sdk/files/nightly
+      FVP_DEPS_LATEST: 0
+      ERIKA_PREBUILT: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Flutter Environment
+        id: setup
+        uses: ./.github/actions/setup-flutter
+
+      - name: Generate build info json
+        shell: pwsh
+        run: python .github/workflows/scripts/generate-build-info-json.py assets/build_info.json
+
+      - name: Build Windows ZIP
+        id: package
+        uses: ./.github/actions/build-windows
+        with:
+          app-version: ${{ steps.setup.outputs.version }}
+          zip-only: "true"
+
+      - name: Upload Windows x64 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: NipaPlay-${{ steps.setup.outputs.version }}-Windows-x64-ZIP
+          path: ${{ steps.package.outputs.zip-path }}
+          if-no-files-found: error
+          retention-days: 7
