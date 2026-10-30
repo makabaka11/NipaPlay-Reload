@@ -1,3 +1,5 @@
+import 'package:nipaplay/themes/nipaplay/widgets/apple_native_media_control.dart';
+import 'package:adaptive_platform_ui/adaptive_platform_ui.dart' as native;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -3121,6 +3123,37 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     final episodes = anime.episodeList ?? const <EpisodeData>[];
     final resolved =
         episodes.isEmpty ? null : _resolveImmersivePrimary(episodes);
+    final useNativeGlass =
+        AdaptiveMediaDetailActionButton.useNativeLiquidGlass(context);
+    final moreItems = [
+      DropdownMenuItemData<_ImmersiveMoreAction>(
+        title: '修改背景图',
+        value: _ImmersiveMoreAction.changeBackdrop,
+      ),
+      if (DandanplayService.isLoggedIn && anime.id > 0)
+        DropdownMenuItemData<_ImmersiveMoreAction>(
+          title: _isFavorited ? '取消收藏' : '收藏',
+          value: _ImmersiveMoreAction.toggleFavorite,
+        ),
+      if (BangumiApiService.isLoggedIn)
+        DropdownMenuItemData<_ImmersiveMoreAction>(
+          title: '编辑 Bangumi 评分与收藏',
+          value: _ImmersiveMoreAction.editBangumiRating,
+        ),
+      if (anime.tags?.isNotEmpty == true)
+        DropdownMenuItemData<_ImmersiveMoreAction>(
+          title: '浏览标签',
+          value: _ImmersiveMoreAction.searchTags,
+        ),
+      DropdownMenuItemData<_ImmersiveMoreAction>(
+        title: _isEpisodeListReversed ? '剧集正序' : '剧集倒序',
+        value: _ImmersiveMoreAction.reverseEpisodes,
+      ),
+      DropdownMenuItemData<_ImmersiveMoreAction>(
+        title: '清理本地记录',
+        value: _ImmersiveMoreAction.clearHistory,
+      ),
+    ];
     return Wrap(
       spacing: 10,
       runSpacing: 10,
@@ -3138,48 +3171,58 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
           label: '评论',
           onPressed: _openImmersiveComments,
         ),
-        BlurDropdown<_ImmersiveMoreAction>(
-          dropdownKey: _immersiveMoreDropdownKey,
-          onItemSelected: (action) => _handleImmersiveMoreAction(action, anime),
-          // 纯动作菜单，没有“当前选中项”，不预先高亮第一行。
-          highlightInitialItem: false,
-          items: [
-            DropdownMenuItemData<_ImmersiveMoreAction>(
-              title: '修改背景图',
-              value: _ImmersiveMoreAction.changeBackdrop,
-            ),
-            if (DandanplayService.isLoggedIn && anime.id > 0)
-              DropdownMenuItemData<_ImmersiveMoreAction>(
-                title: _isFavorited ? '取消收藏' : '收藏',
-                value: _ImmersiveMoreAction.toggleFavorite,
-              ),
-            if (BangumiApiService.isLoggedIn)
-              DropdownMenuItemData<_ImmersiveMoreAction>(
-                title: '编辑 Bangumi 评分与收藏',
-                value: _ImmersiveMoreAction.editBangumiRating,
-              ),
-            if (anime.tags?.isNotEmpty == true)
-              DropdownMenuItemData<_ImmersiveMoreAction>(
-                title: '浏览标签',
-                value: _ImmersiveMoreAction.searchTags,
-              ),
-            DropdownMenuItemData<_ImmersiveMoreAction>(
-              title: _isEpisodeListReversed ? '剧集正序' : '剧集倒序',
-              value: _ImmersiveMoreAction.reverseEpisodes,
-            ),
-            DropdownMenuItemData<_ImmersiveMoreAction>(
-              title: '清理本地记录',
-              value: _ImmersiveMoreAction.clearHistory,
-            ),
-          ],
-          controlBuilder: (context, selectedLabel) => IgnorePointer(
-            child: AdaptiveMediaDetailActionButton(
-              icon: Ionicons.ellipsis_horizontal,
+        if (useNativeGlass && AppleNativeMediaControl.supported)
+          SizedBox(
+            width: 100,
+            child: AppleNativeMediaControl(
               label: '更多',
-              onPressed: () {},
+              symbol: 'ellipsis',
+              items: [
+                for (final item in moreItems)
+                  {'label': item.title, 'enabled': item.enabled},
+              ],
+              onSelected: (index) =>
+                  _handleImmersiveMoreAction(moreItems[index].value, anime),
+            ),
+          )
+        else if (useNativeGlass)
+          SizedBox(
+            width: 100,
+            child: native.AdaptivePopupMenuButton.text<_ImmersiveMoreAction>(
+              label: '更多',
+              height: 44,
+              buttonStyle: native.PopupButtonStyle.glass,
+              tint: Colors.white,
+              items: [
+                for (final item in moreItems)
+                  native.AdaptivePopupMenuItem<_ImmersiveMoreAction>(
+                    label: item.title,
+                    value: item.value,
+                    enabled: item.enabled,
+                  ),
+              ],
+              onSelected: (_, entry) {
+                final action = entry.value;
+                if (action != null) _handleImmersiveMoreAction(action, anime);
+              },
+            ),
+          )
+        else
+          BlurDropdown<_ImmersiveMoreAction>(
+            dropdownKey: _immersiveMoreDropdownKey,
+            onItemSelected: (action) =>
+                _handleImmersiveMoreAction(action, anime),
+            // 纯动作菜单，没有“当前选中项”，不预先高亮第一行。
+            highlightInitialItem: false,
+            items: moreItems,
+            controlBuilder: (context, selectedLabel) => IgnorePointer(
+              child: AdaptiveMediaDetailActionButton(
+                icon: Ionicons.ellipsis_horizontal,
+                label: '更多',
+                onPressed: () {},
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -3238,9 +3281,8 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
               thumbnailPath: history?.thumbnailPath,
               progress: progress,
               // duration 单位为毫秒，格式化前换算为秒。
-              durationLabel: duration > 0
-                  ? _formatPlaybackTime(duration ~/ 1000)
-                  : null,
+              durationLabel:
+                  duration > 0 ? _formatPlaybackTime(duration ~/ 1000) : null,
               isCurrent: _lastWatchedEpisode?.episodeId == episode.id,
               isCompleted: progress >= _kFinishedWatchThreshold ||
                   _dandanplayWatchStatus[episode.id] == true,
@@ -3607,7 +3649,8 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
         HoverScaleTextButton(
           child: const Text('清除所有匹配信息', locale: Locale('zh-Hans', 'zh')),
           onPressed: () {
-            Navigator.of(dialogContext).pop(_EpisodeCleanupAction.clearMatchInfo);
+            Navigator.of(dialogContext)
+                .pop(_EpisodeCleanupAction.clearMatchInfo);
           },
         ),
         HoverScaleTextButton(
@@ -3617,7 +3660,8 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
             style: TextStyle(color: Colors.redAccent),
           ),
           onPressed: () {
-            Navigator.of(dialogContext).pop(_EpisodeCleanupAction.deleteWatchHistory);
+            Navigator.of(dialogContext)
+                .pop(_EpisodeCleanupAction.deleteWatchHistory);
           },
         ),
         HoverScaleTextButton(
@@ -3698,8 +3742,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
       // 过滤掉仅由媒体库扫描/文件匹配生成、没有任何实际播放痕迹的记录，
       // 避免未看过的番剧把“上次观看”错标为某个文件（如最后一话）。
       final watchedItems = historyItems
-          .where(
-              (item) => item.lastPosition > 0 || item.watchProgress > 0)
+          .where((item) => item.lastPosition > 0 || item.watchProgress > 0)
           .toList();
       if (watchedItems.isNotEmpty) {
         // 按最后观看时间排序，取最近的一个

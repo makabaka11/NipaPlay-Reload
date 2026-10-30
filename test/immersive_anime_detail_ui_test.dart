@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:adaptive_platform_ui/adaptive_platform_ui.dart' as native;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nipaplay/app/app_display_surface.dart';
@@ -51,11 +52,49 @@ void main() {
     expect(restartedProvider.enableImmersiveAnimeDetail, isTrue);
   });
 
-  test('media detail actions do not claim simulated native glass support', () {
-    expect(
-      AdaptiveMediaDetailActionButton.supportsNativeLiquidGlass,
-      isFalse,
-    );
+  test('native media detail glass is limited to iOS 26 and newer', () {
+    addTearDown(native.PlatformInfo.clearPlatformOverride);
+    for (final version in [18, 25, 26, 27]) {
+      native.PlatformInfo.setPlatformOverride(
+        native.PlatformOverride.ios,
+        iosVersion: version,
+      );
+      expect(AdaptiveMediaDetailActionButton.supportsNativeLiquidGlass,
+          version >= 26);
+    }
+    for (final platform in [
+      native.PlatformOverride.android,
+      native.PlatformOverride.macos,
+      native.PlatformOverride.web
+    ]) {
+      native.PlatformInfo.setPlatformOverride(platform, iosVersion: 26);
+      expect(
+          AdaptiveMediaDetailActionButton.supportsNativeLiquidGlass, isFalse);
+    }
+  });
+
+  testWidgets('native media detail action keeps subtitle and disabled state',
+      (tester) async {
+    native.PlatformInfo.setPlatformOverride(native.PlatformOverride.ios,
+        iosVersion: 26);
+    addTearDown(native.PlatformInfo.clearPlatformOverride);
+    await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+            body: Wrap(children: [
+      AdaptiveMediaDetailActionButton(
+        icon: Icons.play_arrow,
+        label: '继续观看',
+        detail: '第 3 话 12:30 / 24:00',
+        emphasis: MediaDetailActionEmphasis.primary,
+        onPressed: null,
+      ),
+    ]))));
+    final button = tester
+        .widget<native.AdaptiveButton>(find.byType(native.AdaptiveButton));
+    expect(button.style, native.AdaptiveButtonStyle.prominentGlass);
+    expect(button.enabled, isFalse);
+    expect(find.text('第 3 话 12:30 / 24:00'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   test('detail-rich poster region moves cover display centre upward', () async {
