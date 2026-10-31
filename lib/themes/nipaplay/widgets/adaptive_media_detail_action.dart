@@ -99,7 +99,7 @@ class _AdaptiveMediaDetailActionButtonState
         child: Semantics(
           button: true,
           enabled: enabled,
-          label: widget.label,
+          label: AppleNativeMediaControl.supported ? null : widget.label,
           child: AppleNativeMediaControl.supported
               ? AppleNativeMediaControl(
                   label: widget.label,

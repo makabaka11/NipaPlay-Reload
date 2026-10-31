@@ -41,11 +41,22 @@ private final class MediaControlView: NSView {
         ])
         update(args)
         channel.setMethodCallHandler { [weak self] call, result in
-            guard call.method == "update" else { result(FlutterMethodNotImplemented); return }
-            if let args = call.arguments as? [String: Any] { self?.update(args) }
-            result(nil)
+            switch call.method {
+            case "update":
+                if let args = call.arguments as? [String: Any] { self?.update(args) }
+                result(nil)
+            case "activate":
+                if let self, self.button.isEnabled { self.button.performClick(nil) }
+                result(nil)
+            default:
+                result(FlutterMethodNotImplemented)
+            }
         }
     }
+    // AppKitView input is not forwarded by the pinned Flutter SDK. Let the
+    // Flutter gesture/focus layer own input, avoiding duplicate native clicks.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     deinit { channel.setMethodCallHandler(nil) }
 
@@ -62,25 +73,28 @@ private final class MediaControlView: NSView {
         if #available(macOS 26.0, *) {
             button.bezelStyle = .glass
             button.borderShape = .capsule
-            button.tintProminence = (args["primary"] as? Bool ?? false) ? .primary : .secondary
-            if let argb = args["color"] as? NSNumber {
+            let primary = args["primary"] as? Bool ?? false
+            button.tintProminence = primary ? .primary : .none
+            if primary, let argb = args["color"] as? NSNumber {
                 let value = argb.uint32Value
-                button.contentTintColor = NSColor(red: CGFloat((value >> 16) & 255) / 255,
+                button.bezelColor = NSColor(red: CGFloat((value >> 16) & 255) / 255,
                     green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255,
                     alpha: CGFloat((value >> 24) & 255) / 255)
-            } else { button.contentTintColor = nil }
+            } else { button.bezelColor = nil }
+            button.contentTintColor = nil
         }
         let alignment = NSMutableParagraphStyle()
         alignment.alignment = .center
         alignment.lineBreakMode = .byTruncatingTail
+        let primary = args["primary"] as? Bool ?? false
         let title = NSMutableAttributedString(string: label, attributes: [
             .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
-            .foregroundColor: NSColor.labelColor, .paragraphStyle: alignment,
+            .foregroundColor: primary ? NSColor.white : NSColor.labelColor, .paragraphStyle: alignment,
         ])
         if !detail.isEmpty {
             title.append(NSAttributedString(string: "\n" + detail, attributes: [
                 .font: NSFont.systemFont(ofSize: 11),
-                .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: alignment,
+                .foregroundColor: primary ? NSColor.white.withAlphaComponent(0.78) : NSColor.secondaryLabelColor, .paragraphStyle: alignment,
             ]))
         }
         button.attributedTitle = title

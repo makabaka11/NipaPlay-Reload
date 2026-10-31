@@ -1,9 +1,10 @@
 import 'package:adaptive_platform_ui/adaptive_platform_ui.dart' as native;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
 import 'package:flutter/services.dart';
 import 'package:nipaplay/utils/platform_identity.dart';
-import 'package:nipaplay/utils/platform_utils.dart';
 
 /// macOS and tvOS use a dedicated bridge; iOS keeps its existing bridge.
 class AppleNativeMediaControl extends StatefulWidget {
@@ -52,6 +53,21 @@ class AppleNativeMediaControl extends StatefulWidget {
 
 class _AppleNativeMediaControlState extends State<AppleNativeMediaControl> {
   MethodChannel? _channel;
+  final _focusNode = FocusNode(debugLabel: 'native media control');
+
+  bool get _enabled => widget.items != null || widget.onPressed != null;
+
+  Future<void> _activateNative() async {
+    if (!_enabled) return;
+    _focusNode.requestFocus();
+    try {
+      await _channel?.invokeMethod<void>('activate');
+    } on MissingPluginException {
+      // A route transition may already have disposed this native view.
+    } on PlatformException catch (error) {
+      debugPrint('Native media control activation failed: $error');
+    }
+  }
 
   Map<String, Object?> get _parameters => {
         'label': widget.label,
@@ -59,7 +75,7 @@ class _AppleNativeMediaControlState extends State<AppleNativeMediaControl> {
         'detail': widget.detail,
         'primary': widget.primary,
         'color': widget.color?.toARGB32(),
-        'enabled': widget.items != null || widget.onPressed != null,
+        'enabled': _enabled,
         'items': widget.items,
       };
 
@@ -97,6 +113,7 @@ class _AppleNativeMediaControlState extends State<AppleNativeMediaControl> {
   @override
   void dispose() {
     _channel?.setMethodCallHandler(null);
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -107,21 +124,63 @@ class _AppleNativeMediaControlState extends State<AppleNativeMediaControl> {
       return const SizedBox(height: 44);
     }
     const codec = StandardMessageCodec();
+    if (native.PlatformInfo.isMacOS) {
+      // This project's SDK renders AppKitView but has no macOS platform-view
+      // gesture forwarding. Keep input in Flutter and activate the real Swift
+      // NSButton through the channel, including its native NSMenu action.
+      return Semantics(
+        button: true,
+        enabled: _enabled,
+        label: widget.label,
+        onTap: _enabled ? _activateNative : null,
+        child: FocusableActionDetector(
+          focusNode: _focusNode,
+          enabled: _enabled,
+          shortcuts: const {
+            SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+            SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+          },
+          mouseCursor:
+              _enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          actions: {
+            ActivateIntent: CallbackAction<ActivateIntent>(
+              onInvoke: (_) {
+                _activateNative();
+                return null;
+              },
+            ),
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            excludeFromSemantics: true,
+            onTap: _enabled ? _activateNative : null,
+            child: IgnorePointer(
+              child: SizedBox(
+                height: 44,
+                child: AppKitView(
+                  viewType: 'nipaplay/native_media_control',
+                  hitTestBehavior: PlatformViewHitTestBehavior.transparent,
+                  creationParams: _parameters,
+                  creationParamsCodec: codec,
+                  onPlatformViewCreated: _onCreated,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return SizedBox(
       height: 44,
-      child: Platform.isMacOS
-          ? AppKitView(
-              viewType: 'nipaplay/native_media_control',
-              creationParams: _parameters,
-              creationParamsCodec: codec,
-              onPlatformViewCreated: _onCreated,
-            )
-          : UiKitView(
-              viewType: 'nipaplay/native_media_control',
-              creationParams: _parameters,
-              creationParamsCodec: codec,
-              onPlatformViewCreated: _onCreated,
-            ),
+      child: UiKitView(
+        viewType: 'nipaplay/native_media_control',
+        gestureRecognizers: {
+          Factory<EagerGestureRecognizer>(() => EagerGestureRecognizer()),
+        },
+        creationParams: _parameters,
+        creationParamsCodec: codec,
+        onPlatformViewCreated: _onCreated,
+      ),
     );
   }
 }
