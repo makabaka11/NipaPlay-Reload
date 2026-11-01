@@ -1,9 +1,7 @@
 import 'package:nipaplay/providers/appearance_settings_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:nipaplay/themes/nipaplay/widgets/apple_native_media_control.dart';
-import 'package:nipaplay/utils/platform_identity.dart';
 import 'package:flutter/material.dart';
-import 'package:adaptive_platform_ui/adaptive_platform_ui.dart' as native;
 import 'package:nipaplay/utils/app_accent_color.dart';
 
 enum MediaDetailActionEmphasis { primary, secondary }
@@ -31,8 +29,7 @@ class AdaptiveMediaDetailActionButton extends StatefulWidget {
   final bool expanded;
 
   static bool get supportsNativeLiquidGlass =>
-      AppleNativeMediaControl.supported ||
-      (!isTvOS && native.PlatformInfo.isIOS26OrHigher());
+      AppleNativeMediaControl.supported;
 
   static bool useNativeLiquidGlass(BuildContext context) {
     final enabled = context
@@ -96,60 +93,18 @@ class _AdaptiveMediaDetailActionButtonState
         width: widget.expanded
             ? double.infinity
             : width.clamp(80.0, MediaQuery.sizeOf(context).width - 32),
-        child: Semantics(
-          button: true,
-          enabled: enabled,
-          label: AppleNativeMediaControl.supported ? null : widget.label,
-          child: AppleNativeMediaControl.supported
-              ? AppleNativeMediaControl(
-                  label: widget.label,
-                  detail: widget.detail,
-                  symbol: switch (widget.label) {
-                    '返回' => 'chevron.left',
-                    '评论' => 'bubble.right',
-                    '选择剧集' => 'list.bullet',
-                    _ => 'play.fill',
-                  },
-                  primary: primary,
-                  color: primary ? accent : null,
-                  onPressed: widget.onPressed,
-                )
-              : native.AdaptiveButton.child(
-                  onPressed: widget.onPressed,
-                  enabled: enabled,
-                  style: primary
-                      ? native.AdaptiveButtonStyle.prominentGlass
-                      : native.AdaptiveButtonStyle.glass,
-                  size: native.AdaptiveButtonSize.large,
-                  color: primary ? accent : null,
-                  useSmoothRectangleBorder: false,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(widget.icon, size: 22, color: foreground),
-                        const SizedBox(width: 10),
-                        Flexible(
-                            child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(widget.label,
-                                style: labelStyle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis),
-                            if (widget.detail?.isNotEmpty == true)
-                              Text(widget.detail!,
-                                  style: detailStyle,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis),
-                          ],
-                        )),
-                      ],
-                    ),
-                  ),
-                ),
+        child: AppleNativeMediaControl(
+          label: widget.label,
+          detail: widget.detail,
+          symbol: switch (widget.label) {
+            '返回' => 'chevron.left',
+            '评论' => 'bubble.right',
+            '选择剧集' => 'list.bullet',
+            _ => 'play.fill',
+          },
+          primary: primary,
+          color: primary ? accent : null,
+          onPressed: widget.onPressed,
         ),
       );
     }

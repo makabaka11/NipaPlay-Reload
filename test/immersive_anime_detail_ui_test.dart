@@ -3,6 +3,8 @@ import 'dart:ui' as ui;
 
 import 'package:adaptive_platform_ui/adaptive_platform_ui.dart' as native;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:nipaplay/themes/nipaplay/widgets/apple_native_media_control.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nipaplay/app/app_display_surface.dart';
 import 'package:nipaplay/app/app_display_surface_scope.dart';
@@ -52,13 +54,23 @@ void main() {
     expect(restartedProvider.enableImmersiveAnimeDetail, isTrue);
   });
 
-  test('native media detail glass is limited to iOS 26 and newer', () {
-    addTearDown(native.PlatformInfo.clearPlatformOverride);
+  test('native media detail glass follows the OS capability bridge', () async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const capabilities = MethodChannel('nipaplay/native_media_controls');
+    addTearDown(() async {
+      messenger.setMockMethodCallHandler(capabilities, null);
+      await AppleNativeMediaControl.initialize();
+      native.PlatformInfo.clearPlatformOverride();
+    });
     for (final version in [18, 25, 26, 27]) {
       native.PlatformInfo.setPlatformOverride(
         native.PlatformOverride.ios,
         iosVersion: version,
       );
+      messenger.setMockMethodCallHandler(
+          capabilities, (_) async => version >= 26);
+      await AppleNativeMediaControl.initialize();
       expect(AdaptiveMediaDetailActionButton.supportsNativeLiquidGlass,
           version >= 26);
     }
@@ -68,6 +80,8 @@ void main() {
       native.PlatformOverride.web
     ]) {
       native.PlatformInfo.setPlatformOverride(platform, iosVersion: 26);
+      messenger.setMockMethodCallHandler(capabilities, (_) async => false);
+      await AppleNativeMediaControl.initialize();
       expect(
           AdaptiveMediaDetailActionButton.supportsNativeLiquidGlass, isFalse);
     }
@@ -77,7 +91,19 @@ void main() {
       (tester) async {
     native.PlatformInfo.setPlatformOverride(native.PlatformOverride.ios,
         iosVersion: 26);
-    addTearDown(native.PlatformInfo.clearPlatformOverride);
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const capabilities = MethodChannel('nipaplay/native_media_controls');
+    messenger.setMockMethodCallHandler(capabilities, (_) async => true);
+    messenger.setMockMethodCallHandler(
+        SystemChannels.platform_views, (_) async => null);
+    await AppleNativeMediaControl.initialize();
+    addTearDown(() async {
+      messenger.setMockMethodCallHandler(capabilities, null);
+      await AppleNativeMediaControl.initialize();
+      messenger.setMockMethodCallHandler(SystemChannels.platform_views, null);
+      native.PlatformInfo.clearPlatformOverride();
+    });
     await tester.pumpWidget(const MaterialApp(
         home: Scaffold(
             body: Wrap(children: [
@@ -90,10 +116,12 @@ void main() {
       ),
     ]))));
     final button = tester
-        .widget<native.AdaptiveButton>(find.byType(native.AdaptiveButton));
-    expect(button.style, native.AdaptiveButtonStyle.prominentGlass);
-    expect(button.enabled, isFalse);
-    expect(find.text('第 3 话 12:30 / 24:00'), findsOneWidget);
+        .widget<AppleNativeMediaControl>(find.byType(AppleNativeMediaControl));
+    expect(button.primary, isTrue);
+    expect(button.onPressed, isNull);
+    expect(button.detail, '第 3 话 12:30 / 24:00');
+    expect(find.byType(UiKitView), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
   });
 

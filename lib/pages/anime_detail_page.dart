@@ -1,5 +1,4 @@
 import 'package:nipaplay/themes/nipaplay/widgets/apple_native_media_control.dart';
-import 'package:adaptive_platform_ui/adaptive_platform_ui.dart' as native;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -3183,28 +3182,6 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
               ],
               onSelected: (index) =>
                   _handleImmersiveMoreAction(moreItems[index].value, anime),
-            ),
-          )
-        else if (useNativeGlass)
-          SizedBox(
-            width: 100,
-            child: native.AdaptivePopupMenuButton.text<_ImmersiveMoreAction>(
-              label: '更多',
-              height: 44,
-              buttonStyle: native.PopupButtonStyle.glass,
-              tint: Colors.white,
-              items: [
-                for (final item in moreItems)
-                  native.AdaptivePopupMenuItem<_ImmersiveMoreAction>(
-                    label: item.title,
-                    value: item.value,
-                    enabled: item.enabled,
-                  ),
-              ],
-              onSelected: (_, entry) {
-                final action = entry.value;
-                if (action != null) _handleImmersiveMoreAction(action, anime);
-              },
             ),
           )
         else
