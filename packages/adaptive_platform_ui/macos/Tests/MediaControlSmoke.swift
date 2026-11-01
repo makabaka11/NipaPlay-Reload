@@ -19,6 +19,9 @@ final class TestMessenger: NSObject, FlutterBinaryMessenger {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
+// SDK/OS versions and ordinary views without these optional accessors must
+// remain safe; never send an unsupported KVC message.
+MediaGlassInteraction.update(true, on: NSView())
 let messenger = TestMessenger()
 let accent = NSNumber(value: UInt32(0xFFFF7274))
 private let control = MediaControlView(42, messenger, ["label": "观看", "symbol": "play.fill", "primary": true, "color": accent, "enabled": true])
@@ -29,7 +32,8 @@ if #available(macOS 26.0, *) {
     let reduced = workspace.accessibilityDisplayShouldReduceTransparency || workspace.accessibilityDisplayShouldIncreaseContrast
     assert(glass.style == (reduced ? .regular : .clear))
     if #available(macOS 27.0, *) {
-        assert(glass.effectIsInteractive == (!workspace.accessibilityDisplayShouldReduceMotion && !reduced))
+        assert((glass.value(forKey: "effectIsInteractive") as? Bool) ==
+               (!workspace.accessibilityDisplayShouldReduceMotion && !reduced))
     }
     let color = glass.tintColor!.usingColorSpace(.deviceRGB)!
     assert(abs(color.redComponent - 1) < 0.001)
@@ -122,7 +126,7 @@ control.updatePointerLocation(NSPoint(x: 198, y: 33))
 assert(control.pointerLight.startPoint == CGPoint(x: 0.5, y: 0.5))
 assert(control.pointerLight.animationKeys()?.isEmpty ?? true)
 if #available(macOS 27.0, *) {
-    assert(!(control.glassContainer as! NSGlassEffectView).effectIsInteractive)
+    assert((control.glassContainer.value(forKey: "effectIsInteractive") as? Bool) == false)
 }
 control.updateAccessibility(reduceMotion: false, reducedEffects: true)
 assert(control.pointerLight.opacity == 0)

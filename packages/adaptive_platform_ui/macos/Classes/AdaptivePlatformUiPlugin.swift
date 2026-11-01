@@ -22,6 +22,22 @@ private final class MediaControlFactory: NSObject, FlutterPlatformViewFactory {
     }
 }
 
+/// The public macOS 27 property is absent from the SDK used by Xcode 26 CI.
+/// Resolve its Objective-C accessors at runtime so SDK 26 builds retain the
+/// macOS 26 feedback layers and can still enable native interaction on macOS 27.
+private enum MediaGlassInteraction {
+    static let getter = NSSelectorFromString("effectIsInteractive")
+    static let setter = NSSelectorFromString("setEffectIsInteractive:")
+
+    static func update(_ enabled: Bool, on view: NSView) {
+        guard #available(macOS 27.0, *),
+              view.responds(to: getter), view.responds(to: setter) else { return }
+        if (view.value(forKey: "effectIsInteractive") as? Bool) != enabled {
+            view.setValue(enabled, forKey: "effectIsInteractive")
+        }
+    }
+}
+
 /// A borderless NSButton places imageLeading at the cell edge rather than
 /// centering the icon/title as a group. Lay out its native content explicitly.
 private final class MediaContentButton: NSButton {
@@ -146,7 +162,7 @@ private final class MediaControlView: NSView {
         if #available(macOS 26.0, *) {
             let glass = TrackingMediaGlassView()
             glass.contentView = button
-            if #available(macOS 27.0, *) { glass.effectIsInteractive = true }
+            MediaGlassInteraction.update(true, on: glass)
             glassContainer = glass
         } else {
             glassContainer = NSView()
@@ -304,10 +320,8 @@ private final class MediaControlView: NSView {
         outline.lineWidth = keyFocus ? 2 : 1
         button.highlight(down)
         CATransaction.commit()
-        if #available(macOS 27.0, *), let glass = glassContainer as? NSGlassEffectView {
-            let interactive = active && !reduceMotion && !reducedEffects
-            if glass.effectIsInteractive != interactive { glass.effectIsInteractive = interactive }
-        }
+        MediaGlassInteraction.update(active && !reduceMotion && !reducedEffects,
+                                     on: glassContainer)
     }
 
     override func layout() {
